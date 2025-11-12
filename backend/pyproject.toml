@@ -1,0 +1,11 @@
+[project]
+name = "backend"
+version = "0.1.0"
+description = "Backend infrastructure for heckler"
+readme = "../README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "python-osc>=1.9.3",
+    "requests>=2.32.5",
+    "ruff>=0.14.4",
+]
