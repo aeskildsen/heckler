@@ -12,6 +12,9 @@ from .llm import OllamaClient
 from .osc_server import HecklerOSCServer
 from .websocket import WebSocketBroadcaster
 
+OLLAMA_MODEL = "mistral:7b"
+# OLLAMA_MODEL = "qwen2.5-coder:7b-instruct"
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -187,7 +190,7 @@ async def main():
     app = HecklerApp(
         ollama_host="192.168.3.241",
         ollama_port=11434,
-        ollama_model="mistral:7b",
+        ollama_model=OLLAMA_MODEL,
         osc_host="127.0.0.1",
         osc_port=5005,
         ws_host="0.0.0.0",
