@@ -5,11 +5,13 @@ description = "Backend infrastructure for heckler"
 readme = "../README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "fastapi>=0.121.1",
     "httpx>=0.28.1",
     "python-osc>=1.9.3",
-    "requests>=2.32.5",
-    "ruff>=0.14.4",
-    "uvicorn[standard]>=0.38.0",
+    "pyyaml>=6.0.2",
     "websockets>=15.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.14.4",
 ]

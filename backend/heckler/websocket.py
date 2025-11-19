@@ -1,7 +1,5 @@
 """
 WebSocket broadcast manager for sending LLM responses to browser display.
-
-Uses standalone websockets library (no FastAPI needed).
 """
 
 import json

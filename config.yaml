@@ -1,0 +1,25 @@
+# Heckler Configuration
+# Central configuration file for both backend and frontend
+
+# Ollama LLM Server (typically on Laptop 2)
+ollama:
+  host: "192.168.3.241"
+  port: 11434
+  model: "mistral:7b"
+  # Alternative models:
+  # model: "qwen2.5-coder:7b-instruct"
+  # model: "llama3.1:8b"
+
+# OSC Server (receives code from SuperCollider)
+osc:
+  host: "127.0.0.1"
+  port: 5005
+
+# WebSocket Server (broadcasts to browser)
+websocket:
+  host: "0.0.0.0"
+  port: 8765
+
+# Logging
+logging:
+  level: "INFO"

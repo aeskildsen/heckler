@@ -8,19 +8,10 @@ import asyncio
 import logging
 import signal
 
+from .config import Config
 from .llm import OllamaClient
 from .osc_server import HecklerOSCServer
 from .websocket import WebSocketBroadcaster
-
-OLLAMA_MODEL = "mistral:7b"
-# OLLAMA_MODEL = "qwen2.5-coder:7b-instruct"
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%H:%M:%S",
-)
 
 logger = logging.getLogger(__name__)
 
@@ -187,14 +178,24 @@ class HecklerApp:
 
 async def main():
     """Entry point for the application."""
+    # Load configuration
+    config = Config()
+
+    # Configure logging level from config
+    logging.basicConfig(
+        level=getattr(logging, config.log_level),
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
     app = HecklerApp(
-        ollama_host="192.168.3.241",
-        ollama_port=11434,
-        ollama_model=OLLAMA_MODEL,
-        osc_host="127.0.0.1",
-        osc_port=5005,
-        ws_host="0.0.0.0",
-        ws_port=8765,
+        ollama_host=config.ollama_host,
+        ollama_port=config.ollama_port,
+        ollama_model=config.ollama_model,
+        osc_host=config.osc_host,
+        osc_port=config.osc_port,
+        ws_host=config.ws_host,
+        ws_port=config.ws_port,
     )
 
     # Setup signal handlers
