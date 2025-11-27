@@ -5,11 +5,13 @@ This is a pure asyncio application with no blocking operations.
 """
 
 import asyncio
+import base64
 import logging
 import signal
 
 from .config import Config
 from .llm import OllamaClient
+from .memes import generate_meme_image, save_meme_to_disk
 from .osc_server import HecklerOSCServer
 from .websocket import WebSocketBroadcaster
 
@@ -35,6 +37,11 @@ class HecklerApp:
         osc_port: int = 5005,
         ws_host: str = "0.0.0.0",
         ws_port: int = 8765,
+        memes_enabled: bool = True,
+        memes_save_to_disk: bool = False,
+        memes_output_directory: str = "generated_memes",
+        memes_min_interval: int = 5,
+        memes_max_interval: int = 10,
     ):
         """Initialize Heckler application."""
         self.ollama_host = ollama_host
@@ -44,6 +51,11 @@ class HecklerApp:
         self.osc_port = osc_port
         self.ws_host = ws_host
         self.ws_port = ws_port
+        self.memes_enabled = memes_enabled
+        self.memes_save_to_disk = memes_save_to_disk
+        self.memes_output_directory = memes_output_directory
+        self.memes_min_interval = memes_min_interval
+        self.memes_max_interval = memes_max_interval
 
         # Components
         self.llm: OllamaClient | None = None
@@ -80,15 +92,45 @@ class HecklerApp:
             elif response.get("response_type") == "meme":
                 template = response.get("template")
                 args = response.get("args")
-                if template and args:
-                    await self.ws_broadcaster.broadcast_meme(
-                        template=template, args=args, caption=response.get("caption")
-                    )
+                if template and args and self.memes_enabled:
+                    try:
+                        # Generate meme image with MemePy
+                        logger.info(f"Generating meme: {template} with args: {args}")
+                        image_bytes = generate_meme_image(template, args)
+
+                        # Optionally save to disk
+                        if self.memes_save_to_disk:
+                            filepath = save_meme_to_disk(
+                                image_bytes, self.memes_output_directory, template
+                            )
+                            logger.info(f"Saved meme to {filepath}")
+
+                        # Base64 encode for WebSocket transmission
+                        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+
+                        # Broadcast enhanced meme message with image data
+                        await self.ws_broadcaster.broadcast(
+                            {
+                                "type": "meme",
+                                # "template": template,
+                                "content": image_base64,
+                                "caption": response.get("caption"),
+                            }
+                        )
+
+                    except Exception as e:
+                        logger.error(f"Failed to generate meme: {e}", exc_info=True)
+                        # Fallback to text response
+                        await self.ws_broadcaster.broadcast_text(
+                            f"[Meme generation failed: {e}]"
+                        )
                 else:
-                    # Malformed meme response, log and send fallback
-                    logger.warning(f"Malformed meme response: {response}")
+                    # Malformed meme response or memes disabled, log and send fallback
+                    logger.warning(
+                        f"Malformed meme response or memes disabled: {response}"
+                    )
                     await self.ws_broadcaster.broadcast_text(
-                        "[LLM meme response malformed]"
+                        "[LLM meme response malformed or disabled]"
                     )
             else:
                 logger.warning(f"Unknown response type: {response}")
@@ -112,7 +154,11 @@ class HecklerApp:
         # Initialize LLM client
         logger.info(f"Connecting to Ollama at {self.ollama_host}:{self.ollama_port}")
         self.llm = OllamaClient(
-            host=self.ollama_host, port=self.ollama_port, model=self.ollama_model
+            host=self.ollama_host,
+            port=self.ollama_port,
+            model=self.ollama_model,
+            meme_min_interval=self.memes_min_interval,
+            meme_max_interval=self.memes_max_interval,
         )
 
         # Health check (non-fatal for development)
@@ -196,6 +242,11 @@ async def main():
         osc_port=config.osc_port,
         ws_host=config.ws_host,
         ws_port=config.ws_port,
+        memes_enabled=config.memes_enabled,
+        memes_save_to_disk=config.memes_save_to_disk,
+        memes_output_directory=config.memes_output_directory,
+        memes_min_interval=config.memes_min_interval,
+        memes_max_interval=config.memes_max_interval,
     )
 
     # Setup signal handlers

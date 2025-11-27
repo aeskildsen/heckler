@@ -1,23 +1,45 @@
 :root {
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
+  line-height: 1.2;
   font-weight: 400;
 
   color-scheme: light dark;
-  
+
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  --bg: #DCFAF8;
+
+  /* Color variables */
+  --header-bg: #aae97a;
+  --body-text: rgba(23, 22, 22, 0.87);
+  --body-bg: #b8baba;
+  --main-bg: #f8ffff;
+  --message-text: #000;
+  --message-bg: #e7dede;
+  --timestamp-text: #444343;
+  --typing-bg: gray;
+  --typing-dot: white;
   
+  @media (prefers-color-scheme: dark) {
+    --body-bg: #121212;
+    --body-text: rgb(255, 255, 255);
+    --main-bg: #000000;
+    --header-bg: #0a1940;
+    --header-bg: #1A237E;
+    --message-text: #c7dbf1;
+    --message-bg: #1887ff;
+    --message-bg: #303F9F;
+    --timestamp-text: #bbbbbb;
+    --typing-bg: #444444;
+    --typing-dot: #dddddd;
+  }
 }
 
 body {
-  color: rgba(23, 22, 22, 0.87);
-  background-color: #f8ffff;
+  color: var(--body-text);
+  background-color: var(--body-bg);
   margin: 0;
-  padding: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -25,65 +47,127 @@ body {
   width: 100vw;
 }
 
-.chatbox {
-  background-color: #f8ffff;
-  border-radius: 1em;
-  padding: 10px;
-  min-width: 350px;
-  max-width: 500px;
-  max-height: 600px;
-  min-height: 400px;
-  overflow-y: scroll;
+main {
+  background-color: var(--main-bg);
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
   display: flex;
-  flex-direction: column-reverse;
-  gap: 0.5em;
+  flex-direction: column;
+}
+
+.chatbox {
+  padding: 16px;
+  scrollbar-width: none;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3em;
   justify-content: flex-start;
-  align-items: end;
+  align-items: flex-end;
+  flex: 1;
 }
 
 .header {
+  padding: 12px 12px;
   text-align: center;
   margin-bottom: 0;
   text-align: right;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 15px;
+  background-color: var(--header-bg);
 }
 
-.header h2 {
+.title {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-end;
+  text-align: left;
+}
+
+.title > h2, p {
   margin: 0;
-  padding: 10px;
+  padding: 0;
+}
+
+.header > .profile {
+  border-radius: 50%;
+  corner-shape: squircle;
+}
+
+
+.messageWrapper {
+  max-width: 90%;
+  display: flex;
+  justify-content: flex-end;
+
+  width: fit-content;
+  margin-left: auto;
 }
 
 .chatMessage {
-  background-color: var(--bg);
+  background-color: var(--message-bg);
   margin: 0;
-  border-radius: 1.3em; 
+  border-radius: 2em;
   position: relative;
-  font-family: serif;
-  font-size: 16px;
-  line-height: 24px;
-  max-width: 80%;
-  width: fit-content;
-  padding: 1em;
-  text-align: center;
-  color: #000;
+  font-family: sans-serif;
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 22px;
+  /* max-width: 85%; */
+  /* align-self: flex-end; */
+  /* display: inline-block; */
+  /* width: max-content; */
+  /* text-wrap: balance; */
+  padding: 0.8em;
+  text-align: left;
+  color: var(--message-text);
+  corner-shape: squircle;
 
+  width: fit-content;
+  max-width: 100%;
 }
 
-.chatMessage:before {
-  content: "";
-  width: 0px;
-  height: 0px;
-  position: absolute;
-  border-left: 15px solid var(--bg);
-  border-right: 10px solid transparent;
-  border-top: 10px solid var(--bg);
-  border-bottom: 20px solid transparent;
-  left: 30px;
-  bottom: -24px;
+.chatMessage > img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 1em;
 }
 
 .timeStamp {
   font-size: 0.8em;
-  color: #444343; 
+  color: var(--timestamp-text);
   text-align: right;
   margin-bottom: 10px;
 }
+
+.typing-indicator {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  width: 65px;
+  margin-bottom: 10px;
+  border-radius: 10px;
+  background-color: var(--typing-bg);
+  transition: opacity 0.3s ease-in-out;
+  opacity: 0%;
+}
+
+.active {
+  opacity: 100%;
+}
+
+.typing-indicator > .dot {
+  background-color: var(--typing-dot);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  opacity: 1;
+  animation: blink 1.4s infinite both;
+}
+

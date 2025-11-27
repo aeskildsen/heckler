@@ -76,3 +76,28 @@ class Config:
     def log_level(self) -> str:
         """Logging level."""
         return self._config.get("logging", {}).get("level", "INFO")
+
+    @property
+    def memes_enabled(self) -> bool:
+        """Whether meme generation is enabled."""
+        return self._config.get("memes", {}).get("enabled", True)
+
+    @property
+    def memes_save_to_disk(self) -> bool:
+        """Whether to save generated memes to disk."""
+        return self._config.get("memes", {}).get("save_to_disk", False)
+
+    @property
+    def memes_output_directory(self) -> str:
+        """Directory to save generated memes."""
+        return self._config.get("memes", {}).get("output_directory", "generated_memes")
+
+    @property
+    def memes_min_interval(self) -> int:
+        """Minimum number of text responses between memes."""
+        return self._config.get("memes", {}).get("min_interval", 5)
+
+    @property
+    def memes_max_interval(self) -> int:
+        """Maximum number of text responses between memes."""
+        return self._config.get("memes", {}).get("max_interval", 10)

@@ -1,7 +1,6 @@
-# Heckler Configuration
-# Central configuration file for both backend and frontend
+# Heckler Configuration for backend and frontend
 
-# Ollama LLM Server (typically on Laptop 2)
+# Ollama LLM Server (typically on a remote machine)
 ollama:
   host: "192.168.3.241"
   port: 11434
@@ -23,3 +22,11 @@ websocket:
 # Logging
 logging:
   level: "INFO"
+
+# Meme Generation
+memes:
+  enabled: true
+  save_to_disk: false  # Set to true to save memes for post-performance sharing
+  output_directory: "generated_memes"
+  min_interval: 5  # Minimum text responses between memes
+  max_interval: 8  # Maximum text responses between memes

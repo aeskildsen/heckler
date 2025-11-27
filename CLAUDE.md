@@ -127,8 +127,8 @@ heckler/
 │       └── osc_handler.py  # SuperCollider OSC/HTTP receiver
 │
 └── frontend/               # React + Vite browser UI
-    ├── package.json        # JavaScript dependencies (pnpm)
-    ├── pnpm-lock.yaml      # JavaScript lockfile
+    ├── package.json        # JavaScript dependencies (npm)
+    ├── npm-lock.yaml      # JavaScript lockfile
     └── src/
         ├── App.tsx
         ├── index.html
@@ -141,7 +141,7 @@ heckler/
 
 ### Component Separation
 - Backend and frontend are **completely independent** and self-contained
-- Each has its own dependency management (backend: uv, frontend: pnpm)
+- Each has its own dependency management (backend: uv, frontend: npm)
 - No root-level configuration files needed
 - They communicate only at runtime via WebSocket (backend port 8000, frontend port 5173)
 - SuperCollider (external) sends code blocks to backend via OSC/HTTP
@@ -156,7 +156,7 @@ heckler/
 - **uvicorn**: ASGI server for FastAPI with hot reload
 
 **JavaScript (Frontend)**
-- **pnpm**: Fast, disk-efficient package manager
+- **npm**: Fast, disk-efficient package manager
 - **Vite**: Lightning-fast dev server with HMR (Hot Module Replacement)
 - **React + TypeScript**: UI framework
 
