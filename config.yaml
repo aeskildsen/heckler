@@ -2,7 +2,7 @@
 
 # Ollama LLM Server (typically on a remote machine)
 ollama:
-  host: "192.168.3.241"
+  host: "192.168.137.1"
   port: 11434
   model: "mistral:7b"
   # Alternative models:

@@ -22,6 +22,9 @@ cleanup() {
 
 trap cleanup SIGINT SIGTERM
 
+# Start local network connection
+nmcli con up direct-link
+
 # Start backend
 echo -e "${GREEN}Starting backend server...${NC}"
 cd backend
@@ -46,8 +49,8 @@ echo "Waiting for frontend to start..."
 sleep 3
 
 # Launch Chromium
-echo -e "${GREEN}Launching Chromium...${NC}"
-chromium-browser --app=http://localhost:5173 &
+#echo -e "${GREEN}Launching Chromium...${NC}"
+#chromium-browser --app=http://localhost:5173 &
 
 echo -e "${BLUE}Heckler is running!${NC}"
 echo "Backend: http://localhost:8000"
