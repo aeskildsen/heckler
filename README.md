@@ -1,37 +1,69 @@
 # heckler
 
-Infrastructure for LLM-generated commentary on live coding
+Infrastructure for LLM-generated commentary on live coding.
 
-## Pre-performance Setup
+## LLM Backends
 
-### 1. Network Connection (direct link to Ollama machine)
+Configure `llm_backend` in `config.yaml`:
 
-Connect the USB ethernet adapter to the same USB port as configured, then:
+| Value | Description |
+|---|---|
+| `claude` | Anthropic Claude API — best quality, requires internet + API key |
+| `ollama_local` | Ollama on this machine with a small CPU-friendly model (`qwen2.5-coder:3b`) |
+| `ollama_remote` | Ollama on the gaming laptop over a direct LAN link |
+
+### Claude setup
+
+Add your API key to `.env` in the project root (gitignored):
 
 ```bash
-nmcli con up direct-link
+cp .env.example .env
+# edit .env and set ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-Verify connectivity:
+Model is set in `config.yaml` under `claude.model`. Use `claude-haiku-4-5-20251001` (fast/cheap) or `claude-sonnet-4-6` (higher quality).
+
+To list available models:
+
+```bash
+uv run --directory backend python list_models.py
+```
+
+### Local Ollama setup
+
+```bash
+ollama pull qwen2.5-coder:3b
+# set llm_backend: ollama_local in config.yaml
+```
+
+### Remote Ollama (gaming laptop) setup
+
+Ensure the ethernet adapter has a static IP configured on the Windows machine:
+- IP address: `192.168.137.1` / Subnet: `255.255.255.0` / Gateway: blank
+
+Ollama must listen on all interfaces — set `OLLAMA_HOST=0.0.0.0` and restart Ollama.
+
+Test connectivity:
 ```bash
 ping 192.168.137.1
-```
-
-### 2. Windows Machine (Ollama host)
-
-Ensure the ethernet adapter has a static IP configured:
-- IP address: `192.168.137.1`
-- Subnet mask: `255.255.255.0`
-- Gateway/DNS: leave blank
-
-Ollama must listen on all interfaces. Set environment variable `OLLAMA_HOST=0.0.0.0` and restart Ollama.
-
-Test from Linux machine:
-```bash
 curl http://192.168.137.1:11434/api/tags
 ```
 
-### 3. Audio Routing (headphone output for Reaper)
+## Pre-performance Setup
+
+### 1. Configure `config.yaml`
+
+Set your desired `llm_backend` and check the `startup` section:
+
+```yaml
+startup:
+  frontend: true         # Start the Vite dev server
+  browser: true          # Open Chromium at localhost:5173
+  browser_cmd: "chromium-browser"
+  network_profile: "direct-link"  # nmcli profile (ollama_remote only)
+```
+
+### 2. Audio Routing (headphone output for Reaper)
 
 By default, PipeWire uses the Speaker profile. Switch to Headphones:
 
@@ -41,22 +73,25 @@ pactl set-card-profile alsa_card.pci-0000_00_1f.3-platform-skl_hda_dsp_generic "
 
 Then use `qpwgraph` to route SuperCollider → Reaper → Headphones.
 
-### 4. Start Heckler
+### 3. Start Heckler
 
 ```bash
-./start_local.sh
+./start.sh
 ```
 
-This starts the backend, frontend, and opens the browser display.
+This reads `config.yaml` and starts the backend, optionally the frontend, and optionally opens the browser. If `llm_backend` is `ollama_remote` it also brings up the `direct-link` nmcli profile automatically.
 
-### 5. Run launch script in sc-livecode
+### 4. Run launch script in sc-livecode
 
+```bash
 ./launch.sh
+```
 
-Launches winows and virtual desktops in sway
+Launches windows and virtual desktops in sway.
 
-## Layout diagram
+## Layout
 
+```
 ┌─────────────────────┬──────────┐
 │                     │   LLM    │
 │   SuperCollider     │ responses│
@@ -67,3 +102,4 @@ Launches winows and virtual desktops in sway
 │                     ├──────────┤
 │                     │  Scope   │
 └─────────────────────┴──────────┘
+```

@@ -10,12 +10,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Multi-Component System
 
-The system spans two laptops with these components:
-
-1. **SuperCollider (Laptop 1)** - Audio synthesis + code capture via preprocessor
-2. **Python Middleware (Laptop 1)** - Context management, Ollama communication, meme generation
-3. **Ollama LLM (Laptop 2)** - Local LLM server (llama3.1:8b or mistral:7b)
-4. **Browser Display (Laptop 1)** - WebSocket-based UI for LLM responses and memes
+1. **SuperCollider** - Audio synthesis + code capture via preprocessor
+2. **Python Middleware** - Context management, LLM communication, meme generation
+3. **LLM Backend** (one of three, configured in `config.yaml`):
+   - `claude` — Anthropic Claude API (cloud, best quality)
+   - `ollama_local` — Ollama on this machine with a small CPU model
+   - `ollama_remote` — Ollama on a remote machine (gaming laptop) over LAN
+4. **Browser Display** - WebSocket-based UI for LLM responses and memes
 
 ### Data Flow
 
@@ -23,8 +24,8 @@ The system spans two laptops with these components:
 SuperCollider evaluates code
     ↓ (OSC/HTTP)
 Python middleware
-    ↓ (HTTP POST to port 11434)
-Ollama LLM
+    ↓ (Anthropic API  OR  HTTP POST to Ollama :11434)
+LLM backend
     ↓ (HTTP response)
 Python middleware
     ↓ (WebSocket)
@@ -84,17 +85,17 @@ The LLM must know available MemePy template names and their argument counts:
 - **1 arg**: ItsRetarded, Headache, ClassNote, NutButton, Pills, Loud, Milk, Finally, Hate, Trump
 - **3 args**: Balloon, PredatorHandshake, BellCurve
 
-Ollama's structured JSON output (via `format` and `schema` parameters) ensures correct template selection and argument formatting.
+Ollama uses `format` + JSON schema for structured output. Claude uses tool use with a flat `input_schema` (Claude does not support `oneOf` at the top level of a tool schema). Both paths produce the same `Response` TypedDict.
 
 ## Communication Protocols
 
 ### SuperCollider to Python
-- OSC (port 5000) or HTTP POST
+- OSC (port 5005) or HTTP POST
 - Sends evaluated code blocks via preprocessor hook
 
-### Python to Ollama
-- HTTP POST to `http://gaming-laptop-ip:11434/api/generate`
-- Uses structured JSON schema for response format control
+### Python to LLM
+- **Claude**: Anthropic Python SDK (`anthropic.AsyncAnthropic`), reads `ANTHROPIC_API_KEY` from `.env` or environment
+- **Ollama**: HTTP POST to `http://<host>:11434/api/generate` with JSON schema format field
 
 ### Python to Browser
 - WebSocket (port 8765)
@@ -110,28 +111,30 @@ Screen is divided:
 
 ## Repository Structure
 
-This is a simple repository with two fully independent components that communicate only at runtime:
-
 ```
 heckler/
-├── backend/                 # Python FastAPI server
+├── config.yaml             # Single config file for all settings
+├── .env                    # API keys (gitignored, copy from .env.example)
+├── .env.example            # Template for .env
+├── start.sh                # One-line launcher: exec uv run --directory backend python start.py
+├── list_models.py          # Helper: list available Claude models
+│
+├── backend/                # Python backend
 │   ├── pyproject.toml      # Python dependencies (uv)
-│   ├── uv.lock             # Python lockfile
-│   ├── .venv/              # Python virtual environment
+│   ├── uv.lock
+│   ├── start.py            # Startup orchestrator (reads config, spawns services)
 │   └── heckler/            # Python package
-│       ├── __init__.py
-│       ├── main.py         # FastAPI app entry point
-│       ├── websocket.py    # WebSocket connection handlers
-│       ├── llm.py          # Ollama integration + context management
+│       ├── app.py          # Main app: wires OSC → LLM → WebSocket
+│       ├── config.py       # Config loader (config.yaml + .env)
+│       ├── llm.py          # Multi-backend LLM client (Claude + Ollama)
 │       ├── memes.py        # MemePy meme generation
-│       └── osc_handler.py  # SuperCollider OSC/HTTP receiver
+│       ├── websocket.py    # WebSocket broadcaster
+│       └── osc_server.py   # SuperCollider OSC/HTTP receiver
 │
 └── frontend/               # React + Vite browser UI
-    ├── package.json        # JavaScript dependencies (npm)
-    ├── npm-lock.yaml      # JavaScript lockfile
+    ├── package.json
     └── src/
         ├── App.tsx
-        ├── index.html
         ├── components/
         │   ├── LLMDisplay.tsx
         │   └── MemeDisplay.tsx
@@ -141,9 +144,9 @@ heckler/
 
 ### Component Separation
 - Backend and frontend are **completely independent** and self-contained
-- Each has its own dependency management (backend: uv, frontend: npm)
-- No root-level configuration files needed
-- They communicate only at runtime via WebSocket (backend port 8000, frontend port 5173)
+- Each has its own dependency management (backend: uv, frontend: pnpm)
+- Shared config lives in root `config.yaml` (read only by the backend at startup)
+- They communicate only at runtime via WebSocket
 - SuperCollider (external) sends code blocks to backend via OSC/HTTP
 
 ## Development Setup
@@ -174,26 +177,36 @@ uv sync                      # Install Python dependencies
 # Frontend setup
 cd frontend
 pnpm install                 # Install JavaScript dependencies
+
+# API key (for Claude backend)
+cp .env.example .env         # then edit .env
 ```
 
-### Development Workflow
+### Running
 
-**Terminal 1 (Backend):**
+**All-in-one (production/performance):**
+```bash
+./start.sh
+```
+Reads `config.yaml` and starts backend + optionally frontend + browser. Handles nmcli for `ollama_remote`.
+
+**Development (two terminals with hot reload):**
+
+Terminal 1:
 ```bash
 cd backend
-uv run uvicorn heckler.main:app --reload --host 0.0.0.0 --port 8000
+uv run python -m heckler.app
 ```
 
-**Terminal 2 (Frontend):**
+Terminal 2:
 ```bash
 cd frontend
 pnpm dev
 ```
 
 **Ports:**
-- Backend (FastAPI + WebSocket): `http://localhost:8000`
+- Backend (WebSocket): `ws://localhost:8765`
 - Frontend (Vite): `http://localhost:5173`
-- WebSocket endpoint: `ws://localhost:8000/ws`
 
 ### VSCode Tasks (Optional)
 
@@ -207,11 +220,10 @@ The most critical technical challenge is managing LLM context without overwhelmi
 - Salience (important moments persist)
 - Compression (older material summarized)
 
-### Why Local LLM
-- Performance safety (no internet dependency during live performance)
-- Low latency
-- Complete control over prompts and context
-- No API costs or rate limits
+### LLM Backend Choice
+- **Claude API**: Highest quality, requires internet + API key, costs money per request
+- **Ollama local**: No internet dependency, no cost, runs on CPU with small models (3b)
+- **Ollama remote**: Best local quality (7b+ models) but requires lugging the gaming laptop
 
 ### Why Python Middleware
 - Superior HTTP/async libraries compared to SuperCollider
@@ -225,13 +237,19 @@ The project uses MemePy for meme generation. If additional customization is need
 ### Live Coding Philosophy
 The system reacts to **evaluated blocks** not keystroke tracking, maintaining live coding's evaluation-based workflow and creating better call-and-response rhythm with the LLM.
 
-## Future Tooling Options
+## Configuration Reference
 
-### mise (Maybe-Someday Option)
-**mise** is a Rust-based polyglot task runner that could replace the two-terminal workflow with unified task orchestration:
-- Single command (`mise run dev`) to start both servers with colored, prefixed output
-- Could manage Python and Node.js versions, but maybe Docker is preferred for reproducibility
-- Built-in parallel execution with process management
-- TOML configuration similar to pyproject.toml
+All settings live in `config.yaml` at the project root:
 
-**When to consider:** If managing multiple services becomes cumbersome, or if we need coordinated startup/shutdown sequences.
+| Section | Key | Description |
+|---|---|---|
+| `llm_backend` | — | `claude`, `ollama_remote`, or `ollama_local` |
+| `ollama` | `host`, `port`, `model` | Remote Ollama server |
+| `ollama_local` | `host`, `port`, `model` | Local Ollama (default: `qwen2.5-coder:3b`) |
+| `claude` | `model` | Claude model ID (e.g. `claude-haiku-4-5-20251001`, `claude-sonnet-4-6`) |
+| `osc` | `host`, `port` | OSC receiver for SuperCollider |
+| `websocket` | `host`, `port` | WebSocket server for the browser |
+| `startup` | `frontend`, `browser`, `browser_cmd`, `network_profile` | What `start.sh` launches |
+| `memes` | `enabled`, `min_interval`, `max_interval`, … | Meme generation settings |
+
+API keys go in `.env` (gitignored), not in `config.yaml`.
