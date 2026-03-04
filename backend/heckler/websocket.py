@@ -31,6 +31,7 @@ class WebSocketBroadcaster:
         self.port = port
         self.clients: set[WebSocketServerProtocol] = set()
         self.server: websockets.WebSocketServer | None = None
+        self.on_clear = None  # Callback for clear command
 
     async def _register_client(self, websocket: WebSocketServerProtocol):
         """Register a new WebSocket client."""
@@ -49,8 +50,22 @@ class WebSocketBroadcaster:
         try:
             # Keep connection alive and handle any incoming messages
             async for message in websocket:
-                # Browser shouldn't send messages, but log if it does
+                # Handle incoming commands from browser
                 logger.debug(f"Received message from client: {message}")
+
+                try:
+                    data = json.loads(message)
+                    command = data.get("command")
+
+                    if command == "clear":
+                        logger.info("Received clear command from browser")
+                        # Trigger clear callback if set
+                        if hasattr(self, 'on_clear') and self.on_clear:
+                            await self.on_clear()
+                        # Broadcast clear confirmation to all clients
+                        await self.broadcast({"type": "clear"})
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid JSON from client: {message}")
 
         except websockets.exceptions.ConnectionClosed:
             pass

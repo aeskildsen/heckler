@@ -558,6 +558,19 @@ IMPORTANT:
 - ONLY return response_type and content
 - Keep it brief and snarky"""
 
+    def clear_context(self):
+        """
+        Clear all conversation memory and reset meme counters.
+
+        Use this before starting a new performance to avoid reactions
+        to previous session's context.
+        """
+        logger.info("Clearing conversation context and resetting state")
+        self.memory = ConversationMemory()
+        self.text_responses_since_meme = 0
+        self.meme_threshold = self._generate_meme_threshold()
+        logger.info("Context cleared successfully")
+
     async def health_check(self) -> bool:
         """Check if Ollama server is reachable and model is available."""
         try:

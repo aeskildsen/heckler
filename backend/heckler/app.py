@@ -65,6 +65,16 @@ class HecklerApp:
         # Shutdown event
         self.shutdown_event = asyncio.Event()
 
+    async def _handle_clear(self):
+        """
+        Handle clear command from browser.
+
+        Clears all LLM context and resets state before a new performance.
+        """
+        logger.info("Handling clear command - resetting LLM context")
+        if self.llm:
+            self.llm.clear_context()
+
     async def _handle_code_evaluation(self, code: str):
         """
         Handle code evaluation from SuperCollider.
@@ -168,6 +178,8 @@ class HecklerApp:
 
         # Initialize WebSocket broadcaster
         self.ws_broadcaster = WebSocketBroadcaster(host=self.ws_host, port=self.ws_port)
+        # Set up clear callback to clear LLM context
+        self.ws_broadcaster.on_clear = self._handle_clear
         await self.ws_broadcaster.start()
 
         # Initialize OSC server with code handler
