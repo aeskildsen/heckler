@@ -1,6 +1,12 @@
 # Heckler Configuration for backend and frontend
 
-# Ollama LLM Server (typically on a remote machine)
+# Which LLM backend to use:
+#   ollama_remote  - Ollama on a remote machine (e.g. gaming laptop) [default]
+#   ollama_local   - Ollama on this machine with a small CPU-friendly model
+#   claude         - Anthropic Claude API (set ANTHROPIC_API_KEY env var)
+llm_backend: "claude"
+
+# Remote Ollama LLM Server (used when llm_backend: ollama_remote)
 ollama:
   host: "192.168.137.1"
   port: 11434
@@ -8,6 +14,20 @@ ollama:
   # Alternative models:
   # model: "qwen2.5-coder:7b-instruct"
   # model: "llama3.1:8b"
+
+# Local Ollama (used when llm_backend: ollama_local)
+# Pull the model first: ollama pull qwen2.5-coder:3b
+ollama_local:
+  host: "localhost"
+  port: 11434
+  model: "qwen2.5-coder:3b"
+
+# Claude API (used when llm_backend: claude)
+# Requires: export ANTHROPIC_API_KEY=sk-ant-...
+claude:
+  model: "claude-haiku-4-5-20251001"
+  # For higher quality at higher cost:
+  # model: "claude-sonnet-4-6"
 
 # OSC Server (receives code from SuperCollider)
 osc:
@@ -22,6 +42,13 @@ websocket:
 # Logging
 logging:
   level: "INFO"
+
+# Startup behaviour (used by start.py)
+startup:
+  frontend: true          # Start the Vite dev server
+  browser: true           # Open Chromium pointing at the frontend
+  browser_cmd: "chromium-browser"  # or "chromium", "google-chrome", etc.
+  network_profile: "direct-link"   # nmcli profile to bring up (ollama_remote only)
 
 # Meme Generation
 memes:

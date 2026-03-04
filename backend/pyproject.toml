@@ -5,9 +5,11 @@ description = "Backend infrastructure for heckler"
 readme = "../README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "anthropic>=0.84.0",
     "httpx>=0.28.1",
     "MemePy>=1.2.0",
     "pillow>=11.0.0",
+    "python-dotenv>=1.2.2",
     "python-osc>=1.9.3",
     "pyyaml>=6.0.2",
     "websockets>=15.0.1",

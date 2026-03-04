@@ -30,9 +30,18 @@ class HecklerApp:
 
     def __init__(
         self,
+        llm_backend: str = "ollama_remote",
+        # Remote Ollama
         ollama_host: str = "192.168.3.241",
         ollama_port: int = 11434,
         ollama_model: str = "mistral:7b",
+        # Local Ollama
+        ollama_local_host: str = "localhost",
+        ollama_local_port: int = 11434,
+        ollama_local_model: str = "qwen2.5-coder:3b",
+        # Claude
+        claude_model: str = "claude-haiku-4-5-20251001",
+        # Other
         osc_host: str = "127.0.0.1",
         osc_port: int = 5005,
         ws_host: str = "0.0.0.0",
@@ -44,9 +53,14 @@ class HecklerApp:
         memes_max_interval: int = 10,
     ):
         """Initialize Heckler application."""
+        self.llm_backend = llm_backend
         self.ollama_host = ollama_host
         self.ollama_port = ollama_port
         self.ollama_model = ollama_model
+        self.ollama_local_host = ollama_local_host
+        self.ollama_local_port = ollama_local_port
+        self.ollama_local_model = ollama_local_model
+        self.claude_model = claude_model
         self.osc_host = osc_host
         self.osc_port = osc_port
         self.ws_host = ws_host
@@ -161,20 +175,32 @@ class HecklerApp:
         logger.info("Starting Heckler - Live Coding Commentary System")
         logger.info("=" * 60)
 
-        # Initialize LLM client
-        logger.info(f"Connecting to Ollama at {self.ollama_host}:{self.ollama_port}")
+        # Initialize LLM client based on configured backend
+        logger.info(f"LLM backend: {self.llm_backend}")
+        if self.llm_backend == "ollama_local":
+            host, port, model = self.ollama_local_host, self.ollama_local_port, self.ollama_local_model
+            logger.info(f"Connecting to local Ollama at {host}:{port} (model: {model})")
+        elif self.llm_backend == "claude":
+            host, port, model = "n/a", 0, "n/a"
+            logger.info(f"Using Claude API (model: {self.claude_model})")
+        else:
+            host, port, model = self.ollama_host, self.ollama_port, self.ollama_model
+            logger.info(f"Connecting to remote Ollama at {host}:{port} (model: {model})")
+
         self.llm = OllamaClient(
-            host=self.ollama_host,
-            port=self.ollama_port,
-            model=self.ollama_model,
+            backend=self.llm_backend,
+            host=host,
+            port=port,
+            model=model,
+            claude_model=self.claude_model,
             meme_min_interval=self.memes_min_interval,
             meme_max_interval=self.memes_max_interval,
         )
 
         # Health check (non-fatal for development)
         if not await self.llm.health_check():
-            logger.warning("Ollama health check failed - will use mock responses")
-            logger.warning("This is OK for development/testing without Ollama")
+            logger.warning(f"{self.llm_backend} health check failed - will use mock responses")
+            logger.warning("This is OK for development/testing without a live LLM backend")
 
         # Initialize WebSocket broadcaster
         self.ws_broadcaster = WebSocketBroadcaster(host=self.ws_host, port=self.ws_port)
@@ -247,9 +273,14 @@ async def main():
     )
 
     app = HecklerApp(
+        llm_backend=config.llm_backend,
         ollama_host=config.ollama_host,
         ollama_port=config.ollama_port,
         ollama_model=config.ollama_model,
+        ollama_local_host=config.ollama_local_host,
+        ollama_local_port=config.ollama_local_port,
+        ollama_local_model=config.ollama_local_model,
+        claude_model=config.claude_model,
         osc_host=config.osc_host,
         osc_port=config.osc_port,
         ws_host=config.ws_host,

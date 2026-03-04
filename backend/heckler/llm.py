@@ -1,14 +1,21 @@
 """
-LLM integration module for Ollama with context management.
+LLM integration module with multi-backend support.
+
+Supports three backends configured via config.yaml llm_backend field:
+- "claude"        : Anthropic Claude API (ANTHROPIC_API_KEY env var required)
+- "ollama_remote" : Ollama on a remote machine (e.g. gaming laptop)
+- "ollama_local"  : Ollama on this machine with a small CPU-friendly model
 
 This module handles:
-- Communication with Ollama API
+- Communication with the chosen LLM backend
 - Context window management (sliding window + salience markers)
 - Public vs private LLM requests
 - Memory compression and summarization
 """
 
+import json
 import logging
+import os
 import random
 from collections import deque
 from dataclasses import dataclass, field
@@ -50,7 +57,6 @@ class CodeBlock:
 
     def is_salient(self) -> bool:
         """Check if this block should be marked as important."""
-        # Heuristics for musical importance
         salient_keywords = ["Ndef", "Pdef", "Tdef", "SynthDef", "play", "clear", "stop"]
         return any(keyword in self.code for keyword in salient_keywords)
 
@@ -59,13 +65,11 @@ class CodeBlock:
 class ConversationMemory:
     """Manages LLM context with temporal awareness."""
 
-    # Configuration
-    max_recent_blocks: int = 5  # Keep this many blocks in full detail
-    max_total_blocks: int = 20  # Total history to maintain
+    max_recent_blocks: int = 5
+    max_total_blocks: int = 20
 
-    # Storage
     blocks: deque[CodeBlock] = field(default_factory=deque)
-    summaries: list[str] = field(default_factory=list)  # Private summaries
+    summaries: list[str] = field(default_factory=list)
 
     def add_block(self, code: str) -> CodeBlock:
         """Add a new code block to memory."""
@@ -77,7 +81,6 @@ class ConversationMemory:
 
         self.blocks.append(block)
 
-        # Trim old blocks if we exceed max_total_blocks
         if len(self.blocks) > self.max_total_blocks:
             self.blocks.popleft()
 
@@ -86,7 +89,6 @@ class ConversationMemory:
     def _is_salient(self, code: str) -> bool:
         """Determine if code block is musically important."""
         salient_keywords = ["Ndef", "Pdef", "Tdef", "SynthDef", "play", "clear", "stop"]
-        # Check for big parameter changes
         has_large_numbers = any(
             token.replace(".", "").isdigit() and float(token) > 100
             for token in code.split()
@@ -95,24 +97,17 @@ class ConversationMemory:
         return any(keyword in code for keyword in salient_keywords) or has_large_numbers
 
     def get_context_prompt(self) -> str:
-        """
-        Build context prompt for LLM with weighted recency.
-
-        Recent blocks get full text, older ones get compressed summaries.
-        Salient blocks persist longer in full detail.
-        """
+        """Build context prompt with weighted recency."""
         if not self.blocks:
             return "No previous code has been evaluated yet."
 
         context_parts = []
 
-        # Add any accumulated summaries
         if self.summaries:
             context_parts.append("## Performance History Summary")
             context_parts.extend(self.summaries)
             context_parts.append("")
 
-        # Recent blocks in detail
         recent_blocks = list(self.blocks)[-self.max_recent_blocks :]
         if recent_blocks:
             context_parts.append("## Recent Evaluations")
@@ -125,26 +120,20 @@ class ConversationMemory:
 
         return "\n".join(context_parts)
 
-    async def compress_history(self, ollama_client: "OllamaClient") -> str:
-        """
-        Create a private summary of older blocks (not displayed to audience).
-
-        This is a "hidden" LLM request that compresses musical trajectory.
-        """
+    async def compress_history(self, client: "OllamaClient") -> str:
+        """Create a private summary of older blocks (not displayed to audience)."""
         if len(self.blocks) < self.max_recent_blocks:
             return ""
 
-        # Get blocks that are beyond the recent window
         old_blocks = list(self.blocks)[: -self.max_recent_blocks]
         if not old_blocks:
             return ""
 
         codes = "\n\n".join(f"Block {i}: {b.code}" for i, b in enumerate(old_blocks, 1))
 
-        summary = await ollama_client.request_private_summary(codes)
+        summary = await client.request_private_summary(codes)
         self.summaries.append(summary)
 
-        # Clear compressed blocks
         for _ in range(len(old_blocks)):
             if len(self.blocks) > self.max_recent_blocks:
                 self.blocks.popleft()
@@ -154,34 +143,44 @@ class ConversationMemory:
 
 class OllamaClient:
     """
-    Client for Ollama LLM API with structured output support.
+    LLM client supporting multiple backends: Claude API, remote Ollama, local Ollama.
+
+    Backend is selected at construction time via the `backend` parameter.
     """
 
     def __init__(
         self,
+        backend: Literal["claude", "ollama_remote", "ollama_local"] = "ollama_remote",
+        # Ollama options (used for ollama_remote and ollama_local)
         host: str = "localhost",
         port: int = 11434,
-        model: str = "llama3.1:8b",
+        model: str = "mistral:7b",
+        # Claude options
+        claude_model: str = "claude-haiku-4-5-20251001",
+        # Shared options
         temperature: float = 0.8,
         timeout: float = 30.0,
         meme_min_interval: int = 5,
         meme_max_interval: int = 10,
     ):
+        self.backend = backend
         self.base_url = f"http://{host}:{port}"
         self.model = model
+        self.claude_model = claude_model
         self.temperature = temperature
         self.timeout = timeout
         self.memory = ConversationMemory()
-        self.ollama_available = False  # Track Ollama availability
+        self.available = False  # Track backend availability
 
-        # Meme generation state management
+        # Meme generation state
         self.meme_min_interval = meme_min_interval
         self.meme_max_interval = meme_max_interval
         self.text_responses_since_meme = 0
         self.meme_threshold = self._generate_meme_threshold()
 
-        # Available MemePy templates with arg counts
-        # Ordered by arg count to reduce bias
+        # Lazy-init Anthropic client (only if needed)
+        self._anthropic = None
+
         self.meme_templates = {
             # 1 arg
             "ItsRetarded": 1,
@@ -209,18 +208,19 @@ class OllamaClient:
             "BellCurve": 3,
         }
 
+    def _get_anthropic_client(self):
+        """Lazily create the Anthropic async client."""
+        if self._anthropic is None:
+            import anthropic
+            self._anthropic = anthropic.AsyncAnthropic()  # reads ANTHROPIC_API_KEY from env
+        return self._anthropic
+
     def _generate_meme_threshold(self) -> int:
-        """Generate a random threshold for when to request next meme."""
         return self.meme_min_interval + random.randint(
             0, self.meme_max_interval - self.meme_min_interval
         )
 
     def _validate_meme_args(self, response: MemeResponse) -> tuple[bool, str]:
-        """
-        Validate that meme response has correct number of args for template.
-
-        Returns (is_valid, error_message).
-        """
         template = response.get("template")
         args = response.get("args", [])
 
@@ -239,37 +239,163 @@ class OllamaClient:
 
         return True, ""
 
-    async def generate_commentary(self, code: str) -> Response:
-        """
-        Generate public LLM commentary for evaluated code (displayed to audience).
+    # ------------------------------------------------------------------
+    # Backend dispatch: structured commentary
+    # ------------------------------------------------------------------
 
-        Returns either text commentary or a meme response.
+    async def _call_structured(self, prompt: str, schema: dict) -> Response:
+        """Call the active backend and return a parsed structured Response."""
+        if self.backend == "claude":
+            return await self._call_claude_structured(prompt, schema)
+        else:
+            return await self._call_ollama_structured(prompt, schema)
+
+    async def _call_ollama_structured(self, prompt: str, schema: dict) -> Response:
+        """Call Ollama with JSON schema format."""
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.post(
+                f"{self.base_url}/api/generate",
+                json={
+                    "model": self.model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "format": schema,
+                    "options": {
+                        "temperature": self.temperature,
+                        "num_ctx": 4096,
+                    },
+                },
+            )
+            response.raise_for_status()
+            result = response.json()
+            return json.loads(result["response"])
+
+    async def _call_claude_structured(self, prompt: str, schema: dict) -> Response:
+        """Call Claude API using tool use for structured output.
+
+        Claude's tool input_schema does not support oneOf/allOf/anyOf at the top
+        level, so we use a flat schema with all fields optional and rely on
+        response_type to discriminate.
         """
-        # Add to memory
+        import anthropic
+
+        client = self._get_anthropic_client()
+
+        # Flat schema compatible with Claude tool use restrictions
+        flat_schema = {
+            "type": "object",
+            "properties": {
+                "response_type": {
+                    "type": "string",
+                    "enum": ["text", "meme"],
+                    "description": "Whether this is a text comment or a meme",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Text commentary (required when response_type is 'text')",
+                },
+                "template": {
+                    "type": "string",
+                    "enum": list(self.meme_templates.keys()),
+                    "description": "Meme template name (required when response_type is 'meme')",
+                },
+                "args": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Text arguments for the meme template (required when response_type is 'meme')",
+                },
+                "caption": {
+                    "type": "string",
+                    "description": "Optional caption below the meme",
+                },
+            },
+            "required": ["response_type"],
+        }
+
+        tools = [
+            {
+                "name": "respond",
+                "description": "Output your heckler response",
+                "input_schema": flat_schema,
+            }
+        ]
+
+        message = await client.messages.create(
+            model=self.claude_model,
+            max_tokens=512,
+            messages=[{"role": "user", "content": prompt}],
+            tools=tools,
+            tool_choice={"type": "any"},
+        )
+
+        # Extract tool call result
+        for block in message.content:
+            if block.type == "tool_use" and block.name == "respond":
+                return block.input
+
+        raise ValueError(f"Claude did not return a tool use block: {message.content}")
+
+    # ------------------------------------------------------------------
+    # Backend dispatch: plain text (for private summaries)
+    # ------------------------------------------------------------------
+
+    async def _call_plain(self, prompt: str, temperature: float = 0.5) -> str:
+        """Call the active backend for a plain text response."""
+        if self.backend == "claude":
+            return await self._call_claude_plain(prompt)
+        else:
+            return await self._call_ollama_plain(prompt, temperature)
+
+    async def _call_ollama_plain(self, prompt: str, temperature: float = 0.5) -> str:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.post(
+                f"{self.base_url}/api/generate",
+                json={
+                    "model": self.model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": temperature,
+                        "num_ctx": 4096,
+                    },
+                },
+            )
+            response.raise_for_status()
+            return response.json()["response"]
+
+    async def _call_claude_plain(self, prompt: str) -> str:
+        client = self._get_anthropic_client()
+        message = await client.messages.create(
+            model=self.claude_model,
+            max_tokens=256,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return message.content[0].text
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    async def generate_commentary(self, code: str) -> Response:
+        """Generate public LLM commentary for evaluated code (displayed to audience)."""
         self.memory.add_block(code)
         context = self.memory.get_context_prompt()
 
-        # If Ollama is unavailable, return mock response
-        if not self.ollama_available:
-            logger.debug("Using mock LLM response (Ollama unavailable)")
+        if not self.available:
+            logger.debug("Using mock LLM response (backend unavailable)")
             return TextResponse(
                 response_type="text",
                 content=f"[Mock LLM] Received code: {code[:50]}...",
             )
 
-        # Determine if we should request a meme or text response
         should_request_meme = self.text_responses_since_meme >= self.meme_threshold
         logger.info(
             f"Response decision: text_count={self.text_responses_since_meme}, "
             f"threshold={self.meme_threshold}, requesting_meme={should_request_meme}"
         )
 
-        # Build prompt with mode hint
-        prompt = self._build_commentary_prompt(
-            context, code, request_meme=should_request_meme
-        )
+        prompt = self._build_commentary_prompt(context, code, request_meme=should_request_meme)
 
-        # Define response schema with oneOf for proper discrimination
         schema = {
             "type": "object",
             "required": ["response_type"],
@@ -310,118 +436,59 @@ class OllamaClient:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
-                    f"{self.base_url}/api/generate",
-                    json={
-                        "model": self.model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "format": schema,
-                        "options": {
-                            "temperature": self.temperature,
-                            "num_ctx": 4096,
-                        },
-                    },
-                )
-                response.raise_for_status()
+            parsed: Response = await self._call_structured(prompt, schema)
 
-                result = response.json()
-                response_text = result["response"]
+            # Validate meme responses and retry once if invalid
+            if parsed["response_type"] == "meme":
+                is_valid, error_msg = self._validate_meme_args(parsed)
+                if not is_valid:
+                    logger.warning(f"Invalid meme response: {error_msg}")
+                    logger.info("Retrying with error feedback...")
 
-                # Parse JSON response
-                import json
-
-                parsed: Response = json.loads(response_text)
-
-                # Validate meme responses and retry once if invalid
-                if parsed["response_type"] == "meme":
-                    is_valid, error_msg = self._validate_meme_args(parsed)
-                    if not is_valid:
-                        logger.warning(f"Invalid meme response: {error_msg}")
-                        logger.info("Retrying with error feedback...")
-
-                        # Retry once with error message in prompt
-                        retry_prompt = f"""{prompt}
+                    retry_prompt = f"""{prompt}
 
 ERROR FROM PREVIOUS ATTEMPT:
 {error_msg}
 
 Please try again, ensuring you provide the correct number of arguments."""
 
-                        try:
-                            retry_response = await client.post(
-                                f"{self.base_url}/api/generate",
-                                json={
-                                    "model": self.model,
-                                    "prompt": retry_prompt,
-                                    "stream": False,
-                                    "format": schema,
-                                    "options": {
-                                        "temperature": self.temperature,
-                                        "num_ctx": 4096,
-                                    },
-                                },
-                            )
-                            retry_response.raise_for_status()
-                            retry_result = retry_response.json()
-                            retry_text = retry_result["response"]
-                            parsed = json.loads(retry_text)
+                    try:
+                        parsed = await self._call_structured(retry_prompt, schema)
 
-                            # Validate retry
-                            if parsed["response_type"] == "meme":
-                                is_valid_retry, error_msg_retry = (
-                                    self._validate_meme_args(parsed)
+                        if parsed["response_type"] == "meme":
+                            is_valid_retry, error_msg_retry = self._validate_meme_args(parsed)
+                            if not is_valid_retry:
+                                logger.error(f"Retry also failed: {error_msg_retry}")
+                                return TextResponse(
+                                    response_type="text",
+                                    content="[Meme generation failed - arg count mismatch]",
                                 )
-                                if not is_valid_retry:
-                                    logger.error(
-                                        f"Retry also failed: {error_msg_retry}"
-                                    )
-                                    # Fall back to text response
-                                    return TextResponse(
-                                        response_type="text",
-                                        content="[Meme generation failed - arg count mismatch]",
-                                    )
-                            logger.info("Retry successful!")
+                        logger.info("Retry successful!")
 
-                        except Exception as retry_err:
-                            logger.error(f"Retry failed: {retry_err}")
-                            return TextResponse(
-                                response_type="text",
-                                content="[Meme retry failed]",
-                            )
+                    except Exception as retry_err:
+                        logger.error(f"Retry failed: {retry_err}")
+                        return TextResponse(response_type="text", content="[Meme retry failed]")
 
-                # Update meme/text counter based on response type
-                if parsed["response_type"] == "meme":
-                    # Reset counter and generate new threshold
-                    self.text_responses_since_meme = 0
-                    self.meme_threshold = self._generate_meme_threshold()
-                    logger.info(
-                        f"Meme generated. Reset counter. New threshold: {self.meme_threshold}"
-                    )
-                else:
-                    # Increment text response counter
-                    self.text_responses_since_meme += 1
-                    logger.debug(
-                        f"Text response. Counter: {self.text_responses_since_meme}/{self.meme_threshold}"
-                    )
+            if parsed["response_type"] == "meme":
+                self.text_responses_since_meme = 0
+                self.meme_threshold = self._generate_meme_threshold()
+                logger.info(f"Meme generated. Reset counter. New threshold: {self.meme_threshold}")
+            else:
+                self.text_responses_since_meme += 1
+                logger.debug(
+                    f"Text response. Counter: {self.text_responses_since_meme}/{self.meme_threshold}"
+                )
 
-                logger.info(f"LLM response: {parsed}")
-                return parsed
+            logger.info(f"LLM response: {parsed}")
+            return parsed
 
         except Exception as e:
-            logger.error(f"Ollama request failed: {e}")
-            # Increment counter even on error (it was a text attempt)
+            logger.error(f"LLM request failed: {e}")
             self.text_responses_since_meme += 1
-            # Fallback response
             return TextResponse(response_type="text", content=f"[LLM Error: {e}]")
 
     async def request_private_summary(self, old_codes: str) -> str:
-        """
-        Request a private summary (not displayed to audience).
-
-        Used for context compression.
-        """
+        """Request a private summary (not displayed to audience)."""
         prompt = f"""You are summarizing a live coding performance for internal memory management.
 Compress these older SuperCollider code evaluations into a brief musical trajectory summary.
 Focus on: key patterns established, synthesis techniques used, structural changes.
@@ -432,24 +499,7 @@ OLD CODE BLOCKS:
 Provide a 2-3 sentence summary of the musical direction so far:"""
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
-                    f"{self.base_url}/api/generate",
-                    json={
-                        "model": self.model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "options": {
-                            "temperature": 0.5,  # Lower temp for summaries
-                            "num_ctx": 4096,
-                        },
-                    },
-                )
-                response.raise_for_status()
-
-                result = response.json()
-                return result["response"]
-
+            return await self._call_plain(prompt, temperature=0.5)
         except Exception as e:
             logger.error(f"Private summary failed: {e}")
             return "[Summary unavailable]"
@@ -458,12 +508,10 @@ Provide a 2-3 sentence summary of the musical direction so far:"""
         self, context: str, new_code: str, request_meme: bool = False
     ) -> str:
         """Build the prompt for public commentary."""
-        # Import meme metadata from memes.py
         from . import memes
 
         template_info = memes.get_meme_metadata_for_llm()
 
-        # Use completely different prompt when requesting meme
         if request_meme:
             return f"""
 You are a snarky heckler at a live coding performance. Generate a MEME to react to the SuperCollider code that was just evaluated.
@@ -519,7 +567,6 @@ CRITICAL RULES:
 - Keep each arg under the character limit shown
 - Do NOT include content field"""
 
-        # Text response prompt (original)
         return f"""
 You are a snarky heckler at a live coding performance. Your job is to provide brief, witty commentary on the SuperCollider code being evaluated.
 
@@ -559,12 +606,7 @@ IMPORTANT:
 - Keep it brief and snarky"""
 
     def clear_context(self):
-        """
-        Clear all conversation memory and reset meme counters.
-
-        Use this before starting a new performance to avoid reactions
-        to previous session's context.
-        """
+        """Clear all conversation memory and reset meme counters."""
         logger.info("Clearing conversation context and resetting state")
         self.memory = ConversationMemory()
         self.text_responses_since_meme = 0
@@ -572,7 +614,13 @@ IMPORTANT:
         logger.info("Context cleared successfully")
 
     async def health_check(self) -> bool:
-        """Check if Ollama server is reachable and model is available."""
+        """Check if the configured backend is reachable."""
+        if self.backend == "claude":
+            return await self._health_check_claude()
+        else:
+            return await self._health_check_ollama()
+
+    async def _health_check_ollama(self) -> bool:
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 response = await client.get(f"{self.base_url}/api/tags")
@@ -587,11 +635,47 @@ IMPORTANT:
                     )
                     return False
 
-                logger.info(f"Ollama health check passed. Model '{self.model}' ready.")
-                self.ollama_available = True
+                logger.info(
+                    f"Ollama health check passed ({self.backend}). "
+                    f"Model '{self.model}' ready."
+                )
+                self.available = True
                 return True
 
         except Exception as e:
-            logger.error(f"Ollama health check failed: {e}")
-            self.ollama_available = False
+            logger.error(f"Ollama health check failed ({self.backend}): {e}")
+            self.available = False
+            return False
+
+    async def _health_check_claude(self) -> bool:
+        import anthropic
+
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            logger.error(
+                "Claude backend selected but ANTHROPIC_API_KEY is not set. "
+                "Export it before starting: export ANTHROPIC_API_KEY=sk-ant-..."
+            )
+            self.available = False
+            return False
+
+        try:
+            client = self._get_anthropic_client()
+            # Minimal test call
+            await client.messages.create(
+                model=self.claude_model,
+                max_tokens=10,
+                messages=[{"role": "user", "content": "hi"}],
+            )
+            logger.info(f"Claude health check passed. Model '{self.claude_model}' ready.")
+            self.available = True
+            return True
+
+        except anthropic.AuthenticationError:
+            logger.error("Claude health check failed: invalid API key.")
+            self.available = False
+            return False
+        except Exception as e:
+            logger.error(f"Claude health check failed: {e}")
+            self.available = False
             return False
